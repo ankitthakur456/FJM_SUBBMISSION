@@ -1,0 +1,17 @@
+[Unit]
+Description=Machine HIS Service
+After=network.target
+
+[Service]
+ExecStart=/home/admin/usr/venv/bin/python3 -u network_restart.py
+WorkingDirectory=/home/admin/usr/
+StandardOutput=inherit
+StandardError=inherit
+Restart=always
+User=admin
+
+[Install]
+WantedBy=multi-user.target
+
+
+

@@ -1,0 +1,14 @@
+[Unit]
+Description=WEIGHT MACHINE SERVICE
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 -u weight.py
+WorkingDirectory=/home/admin/usr/
+StandardOutput=inherit
+StandardError=inherit
+Restart=always
+User=admin
+
+[Install]
+WantedBy=multi-user.target

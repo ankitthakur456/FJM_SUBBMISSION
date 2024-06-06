@@ -1,0 +1,31 @@
+[Unit]
+Description=Machine HIS Service
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 -u spinning.py
+WorkingDirectory=/home/admin/usr/
+StandardOutput=inherit
+StandardError=inherit
+Restart=always
+User=admin
+
+[Install]
+WantedBy=multi-user.target
+
+#################
+[Unit]
+Description=Machine HIS Service
+After=network.target
+
+[Service]
+ExecStart=/home/his/usr/venv/bin/python3 -u log_deleter.py
+WorkingDirectory=/home/his/usr/
+StandardOutput=inherit
+StandardError=inherit
+Restart=always
+User=his
+
+[Install]
+WantedBy=multi-user.target
+
