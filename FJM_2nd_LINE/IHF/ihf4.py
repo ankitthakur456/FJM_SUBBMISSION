@@ -64,7 +64,7 @@ GL_MACHINE_INFO = {
         'sub_topic': 'IHFQueue',
         'energy_topic': 'ihf_4_em',
         'param_list': ['heatingTime'],
-        'ip': '192.168.0.2',
+        'ip': '192.168.33.46',
         'machine_id': '01',
         'stage': 'IHF4',
         'line': 'B',
@@ -91,6 +91,7 @@ PUBLISH_TOPIC = ''  # These variables will be initialized by init_conf
 TRIGGER_TOPIC = ''  # These variables will be initialized by init_conf
 ENERGY_TOPIC = ''  # These variables will be initialized by init_conf
 GL_SERIAL_TOPIC = 'Acknowledgements'
+GL_PREV_CYCL_START = time.time()
 # endregion
 
 ob_db = DBHelper()  # Object for DBHelper database class
@@ -319,6 +320,7 @@ def on_connect(client, userdata, flags, rc):
         client.subscribe(TRIGGER_TOPIC)
         client.subscribe(ENERGY_TOPIC)
 
+
     else:
         log.error("Failed to connect, return code %d\n", rc)
 
@@ -496,9 +498,13 @@ if __name__ == "__main__":
                     if new_temp > GL_MAX_TEMP:
                         log.info(f"{new_temp} > {GL_MAX_TEMP}")
                         GL_MAX_TEMP = new_temp
-                    FL_STATUS = True
-
-                elif heating_time < GL_MAX_HEATING_TIME and heating_time == 0:
+                        if not FL_STATUS:
+                            GL_PREV_CYCL_START = time.time()
+                        FL_STATUS = True
+                    log.info(f'[++++++]adding 6 second delay in code {(time.time() - GL_PREV_CYCL_START)} > 90')
+                #elif heating_time < GL_MAX_HEATING_TIME and heating_time == 0 and (time.time() - GL_PREV_CYCL_START) > 88:
+                elif heating_time == 0 and (time.time() - GL_PREV_CYCL_START) > 90:
+                    #log.info(f'[++++++]adding 6 second delay in code {(time.time() - GL_PREV_CYCL_START)}')
                     FL_STATUS = False
 
                 if FL_PREV_STATUS != FL_STATUS:
