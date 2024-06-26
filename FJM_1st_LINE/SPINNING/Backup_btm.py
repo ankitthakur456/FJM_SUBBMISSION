@@ -6,6 +6,7 @@ import paho.mqtt.client as mqtt
 import schedule
 import minimalmodbus
 import logging
+from pyModbusTCP.client import ModbusClient
 import datetime
 import serial
 import serial.tools.list_ports
@@ -76,7 +77,7 @@ GL_MACHINE_INFO = {
             "formingTemperature",
             "hydraulicPowerPack",
         ],
-        "ip": "192.168.0.1",
+        "ip": "192.168.33.45",
         "machine_id": "01",
         "stage": "BSPN",
         "line": "A",
@@ -96,7 +97,7 @@ GL_MACHINE_INFO = {
             "formingTemperature",
             "hydraulicPowerPack",
         ],
-        "ip": "192.168.0.1",
+        "ip": "192.168.33.45",
         "machine_id": "01",
         "stage": "NSPN",
         "line": "A",
@@ -247,27 +248,10 @@ def initiate_modbus(slaveId):
     return instrument
 
 
-# def initiate_modbus(slaveId, big_endian=True):
-#     com_port = None
-#     for i in range(5):
-#         com_port = get_serial_port()
-#         if com_port:
-#             break
-#     i = int(slaveId)
-#     instrument = minimalmodbus.Instrument(com_port, i, mode='rtu')  # 'rtu' mode for Modbus RTU
-#     instrument.serial.baudrate = 19200
-#     instrument.serial.bytesize = 8
-#     instrument.serial.parity = serial.PARITY_NONE
-#     instrument.serial.stopbits = 1
-#     instrument.serial.timeout = 3
-#     instrument.serial.close_after_each_call = True
-#     instrument.big_endian = big_endian  # Set the endian value here
-#     log.info('Modbus ID Initialized: ' + str(i))
-#     return instrument
+
 
 
 def get_machine_data():
-    # :TODO: Implement Function to get data from machine here
     try:
         data_list = []
         param_list = [
@@ -322,6 +306,25 @@ def get_machine_data():
     except Exception as e:
         log.error(e)
 
+
+def Connection():
+    c = ModbusClient(host='192.168.33.45', port=510, unit_id=1, auto_open=True)
+    return c
+
+
+def Reading_data():
+    try:
+        c = Connection()
+        regs = c.read_holding_registers(0, 5)
+        log.info(f"values from register is {regs}")
+        c.close()
+        if not regs:
+            a = [0, 0, 0, 0, 0]
+            return a
+        else:
+            return regs
+    except Exception as err:
+        log.error(f'Error PLC disconnected {err}')
 
 def on_message(client_, userdata, message):
     global GL_CURRENT_KWH, GL_SERIAL_NUMBER_LIST
@@ -422,21 +425,16 @@ def publish_values(payload):
                     if i:  # if payload is not empty
                         ts = i.get("ts")  # save timestamp
                         sync_payload = json.dumps(i.get("payload"))
-                        sync_result = ob_client_mqtt.publish(
-                            PUBLISH_TOPIC, sync_payload, qos=2
-                        )  # send payload
-                        if (
-                                sync_result[0] == 0
-                        ):  # if payload sent successful remove that payload from db
+                        sync_result = ob_client_mqtt.publish(PUBLISH_TOPIC, sync_payload, qos=2
+                                                             )  # send payload
+                        if (sync_result[0] == 0):  # if payload sent successful remove that payload from db
                             ob_db.clear_sync_data(ts)
                         else:  # else break from the loop
                             log.error("[-] Can't send sync_payload")
                             break
         else:
             log.error(f"[-] Failed to send message to topic {PUBLISH_TOPIC}")
-            ob_db.add_sync_data(
-                payload
-            )  # if status is not 0 (ok) then add the payload to the database
+            ob_db.add_sync_data(payload)  # if status is not 0 (ok) then add the payload to the database
 
 
 # endregion
@@ -472,9 +470,7 @@ def publish_values1(payload):
     if GL_SEND_DATA:
         result = [None, None]  # set the result to None
         try:
-            result = ob_client_mqtt1.publish(
-                PUBLISH_TOPIC, payload_str, qos=2
-            )  # try to publish the data
+            result = ob_client_mqtt1.publish(PUBLISH_TOPIC, payload_str, qos=2)  # try to publish the data
         except:  # if publish gives exception
             try:
                 ob_client_mqtt1.disconnect()  # try to disconnect the client
@@ -485,9 +481,7 @@ def publish_values1(payload):
             if not ob_client_mqtt1.is_connected():  # if client is not connected
                 log.info(f"[+] Retrying....")
                 for _ in range(5):
-                    ob_client_mqtt1 = (
-                        try_connect_mqtt1()
-                    )  # retry to connect to the broker
+                    ob_client_mqtt1 = (try_connect_mqtt1())  # retry to connect to the broker
                     time.sleep(1)
                     if ob_client_mqtt1.is_connected():  # if connected: break
                         break
@@ -495,20 +489,14 @@ def publish_values1(payload):
         status = result[0]
         if status == 0:  # if status is 0 (ok)
             log.info(f"[+] Send `{result}` to topic `{PUBLISH_TOPIC}`")
-            sync_data = (
-                ob_db.get_sync_data2()
-            )  # get all the data from the sync payload db
+            sync_data = (ob_db.get_sync_data2())  # get all the data from the sync payload db
             if sync_data:  # if sync_data present
                 for i in sync_data:  # for every payload
                     if i:  # if payload is not empty
                         ts = i.get("ts")  # save timestamp
                         sync_payload = json.dumps(i.get("payload"))
-                        sync_result = ob_client_mqtt1.publish(
-                            PUBLISH_TOPIC, sync_payload, qos=2
-                        )  # send payload
-                        if (
-                                sync_result[0] == 0
-                        ):  # if payload sent successful remove that payload from db
+                        sync_result = ob_client_mqtt1.publish(PUBLISH_TOPIC, sync_payload, qos=2)  # send payload
+                        if (sync_result[0] == 0):  # if payload sent successful remove that payload from db
                             ob_db.clear_sync_data2(ts)
                         else:  # else break from the loop
                             log.error("[-] Can't send sync_payload")
@@ -574,9 +562,6 @@ def publish_values2(payload):
                             break
         else:
             log.error(f"[-] Failed to send message to topic {GL_SERIAL_TOPIC}")
-            # ob_db.add_sync_data2(
-            #     payload
-            # )  # if status is not 0 (ok) then add the payload to the database
 
 
 def get_unknown_serial(line, stage, machine_id):
@@ -591,9 +576,6 @@ def get_unknown_serial(line, stage, machine_id):
 # region for testing only
 
 prev_time = time.time()
-status = True
-tb_len = 0
-sqness = 0
 
 
 def get_status():
@@ -634,16 +616,13 @@ if __name__ == "__main__":
             Cycle_time = 0
             log.info(f"[+] Data is {data}")
             prev_cycletime = time.time()
+            status = Reading_data()
+            log.info(f'status from plc is {status}')
             if data:
                 if FL_FIRST_CYCLE_RUN:
                     FL_FIRST_CYCLE_RUN = False
-                if MAX_VALUE > data.get("formingTemperature") > Threshold_forming_temp:
-                    log.info(f"[+]  {MAX_VALUE} > {data.get('formingTemperature')} > {Threshold_forming_temp}")
-                    log.info(f"[+] Cycle Running")
-                    if not FL_STATUS:
-                        GL_PREV_CYCL_START = time.time()
+                if status[1]:
                     FL_STATUS = True
-
                     try:
                         if (950 <= data.get("formingTemperature") <= 1200):
                             GL_AV_FORMING_TEMP.append(data.get("formingTemperature"))
@@ -656,16 +635,16 @@ if __name__ == "__main__":
                     except Exception as e:
                         log.error(f"[-] Error in inductionTemperature {e}")
                     try:
-                        if (2 <= data.get("O2PressureHeating//") / 100 <= 3):
+                        if 1 <= data.get("O2PressureHeating//") / 100 <= 3:
                             GL_AV_PRESSURE_HEAT.append(data.get("O2PressureHeating//") / 100)
-                        elif GL_MAX_PRESSURE_HEATING < data.get("O2PressureHeating//") / 100 < 2:
+                        elif GL_MAX_PRESSURE_HEATING < data.get("O2PressureHeating//") / 100 < 1:
                             GL_MAX_PRESSURE_HEATING = data.get("O2PressureHeating//") / 100
 
                     except Exception as e:
                         log.error(f"[-] Error in O2PressureHeating {e}")
 
                     try:
-                        if (4 <= data.get("O2PressureCutting") / 100 <= 6):
+                        if (1 <= data.get("O2PressureCutting") / 100 <= 6):
                             GL_AV_PRESSURE_CUTTING.append(data.get("O2PressureCutting") / 100)
                         elif GL_MAX_PRESSURE_CUTTING < data.get("O2PressureCutting") / 100 < 4:
                             GL_MAX_PRESSURE_CUTTING = data.get("O2PressureCutting") / 100
@@ -679,7 +658,7 @@ if __name__ == "__main__":
                         else:
                             propanePressure = data.get("propanePressure") / 100
 
-                        if 0.2 <= propanePressure <= 1.5:
+                        if 0.1 <= propanePressure <= 1.5:
                             GL_AV_PROPANE_PRESSURE.append(propanePressure)
 
 
@@ -687,18 +666,16 @@ if __name__ == "__main__":
                         log.error(f"[-] Error in propanePressure {e}")
 
                     try:
-
                         if data.get("DAAcetylenePressure") > 1000:
                             log.info(
-                                f'[+]------------------value is more then 60000 <{data.get("DAAcetylenePressure")}'
-                            )
+                                f'[+]------------------value is more then 60000 <{data.get("DAAcetylenePressure")}')
                             DAAcetylenePressure = 0
                         else:
                             DAAcetylenePressure = data.get("DAAcetylenePressure") / 100
 
-                        if 0.3 <= DAAcetylenePressure <= 0.5:
+                        if 0.1 <= DAAcetylenePressure <= 0.5:
                             GL_AV_DAACETYLENE_PRESSURE.append(DAAcetylenePressure)
-                        elif GL_MAX_DAACETYLENE_PRESSURE < DAAcetylenePressure < 0.3:
+                        elif DAAcetylenePressure < 0.1:
                             GL_MAX_DAACETYLENE_PRESSURE = DAAcetylenePressure
 
                     except Exception as e:
@@ -706,9 +683,7 @@ if __name__ == "__main__":
 
                     try:
                         if data.get("hydraulicPowerPack") > 160:
-                            log.info(
-                                f'[+]-value is more then 160 < {data.get("hydraulicPowerPack")}'
-                            )
+                            log.info(f'[+]-value is more then 160 < {data.get("hydraulicPowerPack")}')
                             hydraulicPowerPack = 157
                             GL_AV_HYDROLIC_POWER_PACK.append(hydraulicPowerPack)
                         else:
@@ -719,13 +694,7 @@ if __name__ == "__main__":
                     except Exception as e:
                         log.error(f"[-] Error in hydraulicPowerPack {e}")
                     prev_cycletime = time.time()
-
-
-
-                elif (
-                        data.get("formingTemperature") < End_thresh
-                        and (time.time() - GL_PREV_CYCL_START) > 110
-                ):
+                if not status[1]:
                     log.info(f"[+] Cycle Stopped")
                     GL_FORMING_TEMP = data.get("formingTemperature")
                     FL_STATUS = False
@@ -745,9 +714,7 @@ if __name__ == "__main__":
                     if serial_number is None:
                         # serial_number = get_unknown_serial(LINE, STAGE, MACHINE_ID)
                         serial_number = "null1"
-                        log.info(
-                            f"[+] Adding Unknown serial number to queue {serial_number}"
-                        )
+                        log.info(f"[+] Adding Unknown serial number to queue {serial_number}")
                         ob_db.enqueue_serial_number(serial_number)
 
                     payload = {
@@ -756,14 +723,10 @@ if __name__ == "__main__":
                         "serialNumber": serial_number,
                     }
                     log.info(f"{payload}")
-                    if (
-                            FL_STATUS
-                    ):  # if cycle started if started then publish serial number only
+                    if FL_STATUS:  # if cycle started if started then publish serial number only
                         log.info("[+] Cycle Running")
                         # print(payload)
-                    if (
-                            not FL_STATUS
-                    ):  # if cycle ended then publish serial number with data
+                    if not FL_STATUS:  # if cycle ended then publish serial number with data
                         log.info(f"[+] Cycle Stopped")
                         power = GL_CURRENT_KWH - GL_PREV_KWH
                         if power > power_consumption:
