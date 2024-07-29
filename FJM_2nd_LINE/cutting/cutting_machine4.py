@@ -1,13 +1,8 @@
 import os
 import time
-import random
 import json
-import random
 import paho.mqtt.client as mqtt
-import schedule
 import minimalmodbus
-from pyModbusTCP.client import ModbusClient
-import logging
 import random
 import datetime
 import serial
@@ -15,7 +10,6 @@ import serial.tools.list_ports
 from database import DBHelper
 import logging.handlers
 from logging.handlers import TimedRotatingFileHandler
-from conversions import word_list_to_long, f_list, decode_ieee
 
 # region Rotating Logs
 dirname = os.path.dirname(os.path.abspath(__file__))
@@ -60,6 +54,8 @@ GL_MACHINE_INFO = {
         'ip': '192.168.0.1',
         'machine_id': 'MC-04',
         'stage': 'CUTTING',
+        'SERIAL_TOPIC': 'Acknowledgements',
+        'LWT_TOPIC': 'DEVICE_STATUS',
         'line': 'A',
     }}
 
@@ -70,7 +66,8 @@ MOde_Selection = {
 
     '2': 'Yca',
 
-    '3': {'132': '1067', '133': '1068','134': '1067', '135': '1067', '136': '1066', '137': '1066', '138': '1067', '139': '1068', '143': '1069',
+    '3': {'132': '1067', '133': '1068', '134': '1067', '135': '1067', '136': '1066', '137': '1066', '138': '1067',
+          '139': '1068', '143': '1069',
           '140': '1070', '141': '1068', '142': '1068', '144': '1067', '145': '1068', '146': '1067', '147': '1068',
           '148': '1068', '149': '1067'},
 
@@ -103,7 +100,7 @@ GL_PARAM_LIST = []  # These variables will be initialized by init_conf
 # endregion
 
 # region MQTT params
-MQTT_BROKER = 'ec2-13-232-172-215.ap-south-1.compute.amazonaws.com'
+
 MQTT_BROKER1 = '192.168.33.150'
 MQTT_PORT = 1883
 USERNAME = 'mmClient'
@@ -114,7 +111,6 @@ PUBLISH_TOPIC = ''  # These variables will be initialized by init_conf
 TRIGGER_TOPIC = ''  # These variables will be initialized by init_conf
 DEQUEUE_TOPIC = 'removeCylinder'
 TOPIC = ''
-GL_SERIAL_TOPIC = 'Acknowledgements'
 # endregion
 
 # topic: removeCylinder
@@ -152,7 +148,7 @@ GL_DEQUEUE_SERIAL = ''
 # region Initialising Configuration here
 def init_conf():
     global GL_MACHINE_NAME, GL_PARAM_LIST, PUBLISH_TOPIC, TOPIC, TRIGGER_TOPIC, GL_IP
-    global MACHINE_ID, LINE, STAGE
+    global MACHINE_ID, LINE, STAGE, GL_SERIAL_TOPIC, LWT_TOPIC
     if not os.path.isdir("./conf"):
         log.info("[-] conf directory doesn't exists")
         try:
@@ -174,8 +170,9 @@ def init_conf():
             PUBLISH_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]['pub_topic']
             TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]['pub_topic2']
             TRIGGER_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]['sub_topic']
-
             MACHINE_ID = GL_MACHINE_INFO[GL_MACHINE_NAME]["machine_id"]
+            GL_SERIAL_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]["SERIAL_TOPIC"]
+            LWT_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]["LWT_TOPIC"]
             STAGE = GL_MACHINE_INFO[GL_MACHINE_NAME]["stage"]
             LINE = GL_MACHINE_INFO[GL_MACHINE_NAME]["line"]
             GL_IP = GL_MACHINE_INFO[GL_MACHINE_NAME]['ip']
@@ -192,8 +189,12 @@ init_conf()
 log.info(f"[+] Machine is {GL_MACHINE_NAME}")
 log.info(f"[+] Machine IP is {GL_IP}")
 log.info(f"[+] Publish topic is {PUBLISH_TOPIC}")
-log.info(f"[+] Publish topic is {TOPIC}")
+log.info(f"[+] SERIAL_TOPIC is {GL_SERIAL_TOPIC}")
+log.info(f"[+] LWT_TOPIC is {LWT_TOPIC}")
 log.info(f"[+] Trigger topic is {TRIGGER_TOPIC}")
+
+lwt_message = {'machine_id': MACHINE_ID, 'line_id': LINE, 'stage': STAGE, 'status': 'offline'}
+lwt_payload = f"{lwt_message}"
 
 
 # endregion
@@ -302,7 +303,9 @@ def on_connect(client, userdata, flags, rc):
         log.info("Connected to MQTT Broker!")
         # client.subscribe(PUBLISH_TOPIC)
         client.subscribe(TRIGGER_TOPIC)
-        client.subscribe(DEQUEUE_TOPIC)
+        lwt_message['status'] = 'online'
+        client.publish(LWT_TOPIC, f"{lwt_message}", qos=2, retain=False)
+
     else:
         log.error("Failed to connect, return code %d\n", rc)
 
@@ -324,7 +327,7 @@ def on_connect(client, userdata, flags, rc):
 #     except Exception as e:
 #         log.error(f"[-] Error while starting loop {e}")
 #     return client_mqtt
-#
+
 
 # def publish_values(payload):
 #     global ob_client_mqtt
@@ -417,6 +420,7 @@ def publish_values3(payload):
 # endregion
 def try_connect_mqtt1():
     client_mqtt = mqtt.Client(GL_CLIENT_ID)
+    client_mqtt.will_set(LWT_TOPIC, payload=lwt_payload, qos=2, retain=False)
     client_mqtt.on_connect = on_connect
     client_mqtt.on_message = on_message
     client_mqtt.username_pw_set(USERNAME, PASSWORD)
@@ -542,6 +546,7 @@ status = True
 tb_len = 0
 sqness = 0
 
+
 def get_machine_data():
     global prev_time, status, tb_len, sqness
     if (time.time() - prev_time) > 20:
@@ -549,9 +554,9 @@ def get_machine_data():
         status = not status
     return status
 
+
 # till here
 if __name__ == "__main__":
-    #ob_client_mqtt = try_connect_mqtt()
     ob_client_mqtt1 = try_connect_mqtt1()
     while True:
         try:
@@ -586,7 +591,6 @@ if __name__ == "__main__":
                             "stage": STAGE
                         })
                         log.info(f"Serial Deleted response payload:- {pl}")
-                        #ob_client_mqtt.publish(DEQUEUE_TOPIC, pl)
                         ob_client_mqtt1.publish(DEQUEUE_TOPIC, pl)
                     GL_DEQUEUE_SERIAL = ''
                 except Exception as e:
@@ -661,7 +665,6 @@ if __name__ == "__main__":
                         }
                         log.info(payload)
                         publish_values3(payload2)
-                        #publish_values(payload)
                         publish_values1(payload)
                         ob_db.delete_serial_number(serial_number)
                         GL_MAX_TUBE_LEN1 = 0

@@ -1,10 +1,11 @@
+
 import os
 import time
 import json
+import snap7
 import random
 import paho.mqtt.client as mqtt
 from pyModbusTCP.client import ModbusClient
-import logging
 import minimalmodbus
 import datetime
 import serial
@@ -12,7 +13,6 @@ import serial.tools.list_ports
 from database import DBHelper
 import logging.handlers
 from logging.handlers import TimedRotatingFileHandler
-from conversions import word_list_to_long, f_list, decode_ieee
 
 # region Rotating Logs
 dirname = os.path.dirname(os.path.abspath(__file__))
@@ -52,10 +52,12 @@ GL_MACHINE_INFO = {
     'IHF-3': {
         'pub_topic': 'STG003',
         'sub_topic': 'IHFQueue',
-        'energy_topic': 'ihf_1_em',
-        'param_list': ['pyrometerTemperature', 'pyrometerTemperature2', 'energyConsumption', 'heatingTime'],
-        'ip': '192.168.0.1',
-        'machine_id': '01',
+        'energy_topic': 'ihf_3_em',
+        'param_list': ['heatingTime'],
+        'ip': '192.168.0.2',
+        'machine_id': '03',
+        'SERIAL_TOPIC': 'Acknowledgements',
+        'LWT_TOPIC': 'DEVICE_STATUS',
         'stage': 'IHF3',
         'line': 'B',
     },
@@ -63,10 +65,10 @@ GL_MACHINE_INFO = {
         'pub_topic': 'STG006',
         'sub_topic': 'IHFQueue',
         'energy_topic': 'ihf_4_em',
-        'param_list': ['heatingTime'],
-        'ip': '192.168.33.46',
+        'param_list': ['pyrometerTemperature', 'pyrometerTemperature2', 'energyConsumption', 'heatingTime'],
+        'ip': '192.168.1.1',
         'machine_id': '01',
-        'stage': 'IHF4',
+        'stage': 'IHF2',
         'line': 'B',
     }
 }
@@ -79,9 +81,10 @@ GL_IP = ''
 GL_U_ID = 1
 GL_PARAM_LIST = []  # These variables will be initialized by init_conf
 # endregion
-heating_time = 0
+
 # region MQTT params
-MQTT_BROKER = '192.168.33.150'
+
+MQTT_BROKER1 = '192.168.33.150'
 MQTT_PORT = 1883
 USERNAME = 'mmClient'
 PASSWORD = 'ind4.0#2023'
@@ -90,8 +93,7 @@ GL_CLIENT_ID = f'HIS-MQTT-{random.randint(0, 1000)}'
 PUBLISH_TOPIC = ''  # These variables will be initialized by init_conf
 TRIGGER_TOPIC = ''  # These variables will be initialized by init_conf
 ENERGY_TOPIC = ''  # These variables will be initialized by init_conf
-GL_SERIAL_TOPIC = 'Acknowledgements'
-GL_PREV_CYCL_START = time.time()
+
 # endregion
 
 ob_db = DBHelper()  # Object for DBHelper database class
@@ -118,15 +120,20 @@ FL_PREV_STATUS = False
 FL_FIRST_CYCLE_RUN = True
 GL_SERIAL_NUMBER = ''
 GL_SERIAL_NUMBER1 = ''
-GL_PREV_CYCL_START = time.time()
+
+plc = snap7.client.Client()
+db_number = 50
+byte_offset = 1
+bit_offset = 2
+data_length = 3
+
 
 # endregion
-
-
+GL_PREV_CYCL_START = time.time()
 # region Initialising Configuration here
 def init_conf():
     global GL_MACHINE_NAME, GL_PARAM_LIST, PUBLISH_TOPIC, TRIGGER_TOPIC, ENERGY_TOPIC, GL_IP
-    global MACHINE_ID, LINE, STAGE
+    global MACHINE_ID, LINE, STAGE, GL_SERIAL_TOPIC, LWT_TOPIC
     if not os.path.isdir("./conf"):
         log.info("[-] conf directory doesn't exists")
         try:
@@ -149,6 +156,8 @@ def init_conf():
             TRIGGER_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]['sub_topic']
             ENERGY_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]['energy_topic']
             MACHINE_ID = GL_MACHINE_INFO[GL_MACHINE_NAME]["machine_id"]
+            GL_SERIAL_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]["SERIAL_TOPIC"]
+            LWT_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]["LWT_TOPIC"]
             STAGE = GL_MACHINE_INFO[GL_MACHINE_NAME]["stage"]
             LINE = GL_MACHINE_INFO[GL_MACHINE_NAME]["line"]
             GL_IP = GL_MACHINE_INFO[GL_MACHINE_NAME]['ip']
@@ -165,10 +174,13 @@ init_conf()
 log.info(f"[+] Machine is {GL_MACHINE_NAME}")
 log.info(f"[+] Machine IP is {GL_IP}")
 log.info(f"[+] Publish topic is {PUBLISH_TOPIC}")
+log.info(f"[+] SERIAL_TOPIC is {GL_SERIAL_TOPIC}")
+log.info(f"[+] LWT_TOPIC is {LWT_TOPIC}")
 log.info(f"[+] Trigger topic is {TRIGGER_TOPIC}")
 log.info(f"[+] Energy topic is {ENERGY_TOPIC}")
 
-
+lwt_message = {'machine_id': MACHINE_ID, 'line_id': LINE, 'stage': STAGE, 'status': 'offline'}
+lwt_payload = f"{lwt_message}"
 # endregion
 
 
@@ -206,7 +218,6 @@ def initiate_modbus(slaveId):
 
 
 def get_machine_data():
-
     try:
         data_list = []
         param_list = ['pyrometerTemperature']
@@ -243,23 +254,9 @@ def get_machine_data():
 
         payload["inductionTemperature"] = 0
         return payload
-        # data = {
-        #     "inductionTemperature": 70,
-        #     "O2PressureHeating": 200,
-        #     "O2PressureCutting": 200,
-        #     "PNGPressure": 45,
-        #     "propanePressure": 23,
-        #     "DAAcetylenePressure": 23,
-        #     "formingTemperature": get_forming_temperature(),
-        #     "energyConsumption": 20,
-        #     "hydraulicPowerPack": 20,
-        #     'status': True,
-        # }
 
     except Exception as e:
         log.error(e)
-
-
 # endregion
 def initiate_client(ip, unit_id):
     """returns the modbus client instance"""
@@ -273,7 +270,7 @@ def read_values(mb_client, parameters):
         payload = dict()
         # TCP auto connect on modbus request, close after it
         log.info("[+] Reading values from holding registers")
-        data0 = mb_client.read_holding_registers(1, 1)
+        data0 = mb_client.read_holding_registers(10, 1)
         log.info(f"Got Time from machine : {data0}")
         values = data0
         if values is None:
@@ -284,7 +281,7 @@ def read_values(mb_client, parameters):
         log.error(f"[!] Error reading parameters from machine: {e}")
         return None
 
-# endregion
+
 
 # region MQTT Functions
 def on_message(client_, userdata, message):
@@ -299,13 +296,11 @@ def on_message(client_, userdata, message):
 
     if message.topic == TRIGGER_TOPIC:  # if message is from trigger topic for serial number
         if data is not None:
-            if data.get("line") == 'B' and data.get("stage") == 'STG006' and data.get("operation") == "push":
+            if data.get("line") == 'B' and data.get("stage") == 'STG003' and data.get("operation") == "push":
                 GL_SERIAL_NUMBER = data.get("serialNumber")
                 log.info(f"serial_number list is {GL_SERIAL_NUMBER}")
-            if data.get("line") == 'B' and data.get("stage") == 'STG006' and data.get("operation") == "pop":
+            if data.get("line") == 'B' and data.get("stage") == 'STG003' and data.get("operation") == "pop":
                 GL_SERIAL_NUMBER1 = data.get("serialNumber")
-
-
 
     elif message.topic == ENERGY_TOPIC:  # if message is from energy meter then update the energy value
         if data is not None:
@@ -319,20 +314,85 @@ def on_connect(client, userdata, flags, rc):
         client.subscribe(PUBLISH_TOPIC)
         client.subscribe(TRIGGER_TOPIC)
         client.subscribe(ENERGY_TOPIC)
-
+        lwt_message['status'] = 'online'
+        client.publish(LWT_TOPIC, f"{lwt_message}", qos=2, retain=False)
 
     else:
         log.error("Failed to connect, return code %d\n", rc)
 
 
-def try_connect_mqtt():
+# def try_connect_mqtt():
+#     client_mqtt = mqtt.Client(GL_CLIENT_ID)
+#     client_mqtt.on_connect = on_connect
+#     client_mqtt.on_message = on_message
+#     client_mqtt.username_pw_set(USERNAME, PASSWORD)
+#     for i in range(5):
+#         try:
+#             client_mqtt.connect(MQTT_BROKER, MQTT_PORT, clean_start=mqtt.MQTT_CLEAN_START_FIRST_ONLY, keepalive=60)
+#             if client_mqtt.is_connected():
+#                 break
+#         except Exception as e:
+#             log.error(f"[-] Unable to connect to mqtt broker {e}")
+#     try:
+#         client_mqtt.loop_start()
+#     except Exception as e:
+#         log.error(f"[-] Error while starting loop {e}")
+#     return client_mqtt
+
+
+# def publish_values(payload):
+#     global ob_client_mqtt
+#     payload_str = json.dumps(payload)
+#     log.info(f"{payload_str}")
+#
+#     if GL_SEND_DATA:
+#         result = [None, None]  # set the result to None
+#         try:
+#             result = ob_client_mqtt.publish(PUBLISH_TOPIC, payload_str, qos=2)  # try to publish the data
+#         except:  # if publish gives exception
+#             try:
+#                 ob_client_mqtt.disconnect()  # try to disconnect the client
+#                 log.info(f"[+] Disconnected from Broker")
+#                 time.sleep(2)
+#             except:
+#                 pass
+#             if not ob_client_mqtt.is_connected():  # if client is not connected
+#                 log.info(f"[+] Retrying....")
+#                 for _ in range(5):
+#                     ob_client_mqtt = try_connect_mqtt()  # retry to connect to the broker
+#                     time.sleep(1)
+#                     if ob_client_mqtt.is_connected():  # if connected: break
+#                         break
+#         # result: [0, 1]
+#         status = result[0]
+#         if status == 0:  # if status is 0 (ok)
+#             log.info(f"[+] Send `{result}` to topic `{PUBLISH_TOPIC}`")
+#             sync_data = ob_db.get_sync_data()  # get all the data from the sync payload db
+#             if sync_data:  # if sync_data present
+#                 for i in sync_data:  # for every payload
+#                     if i:  # if payload is not empty
+#                         ts = i.get("ts")  # save timestamp
+#                         sync_payload = json.dumps(i.get("payload"))
+#                         sync_result = ob_client_mqtt.publish(PUBLISH_TOPIC, sync_payload, qos=2)  # send payload
+#                         if sync_result[0] == 0:  # if payload sent successful remove that payload from db
+#                             ob_db.clear_sync_data(ts)
+#                         else:  # else break from the loop
+#                             log.error("[-] Can't send sync_payload")
+#                             break
+#         else:
+#             log.error(f"[-] Failed to send message to topic {PUBLISH_TOPIC}")
+#             ob_db.add_sync_data(payload)  # if status is not 0 (ok) then add the payload to the database
+
+
+def try_connect_mqtt1():
     client_mqtt = mqtt.Client(GL_CLIENT_ID)
+    client_mqtt.will_set(LWT_TOPIC, payload=lwt_payload, qos=2, retain=False)
     client_mqtt.on_connect = on_connect
     client_mqtt.on_message = on_message
     client_mqtt.username_pw_set(USERNAME, PASSWORD)
     for i in range(5):
         try:
-            client_mqtt.connect(MQTT_BROKER, MQTT_PORT, clean_start=mqtt.MQTT_CLEAN_START_FIRST_ONLY, keepalive=60)
+            client_mqtt.connect(MQTT_BROKER1, MQTT_PORT, clean_start=mqtt.MQTT_CLEAN_START_FIRST_ONLY, keepalive=60)
             if client_mqtt.is_connected():
                 break
         except Exception as e:
@@ -344,28 +404,28 @@ def try_connect_mqtt():
     return client_mqtt
 
 
-def publish_values(payload):
-    global ob_client_mqtt
+def publish_values1(payload):
+    global ob_client_mqtt1
     payload_str = json.dumps(payload)
     log.info(f"{payload_str}")
 
     if GL_SEND_DATA:
         result = [None, None]  # set the result to None
         try:
-            result = ob_client_mqtt.publish(PUBLISH_TOPIC, payload_str, qos=2)  # try to publish the data
+            result = ob_client_mqtt1.publish(PUBLISH_TOPIC, payload_str, qos=2)  # try to publish the data
         except:  # if publish gives exception
             try:
-                ob_client_mqtt.disconnect()  # try to disconnect the client
+                ob_client_mqtt1.disconnect()  # try to disconnect the client
                 log.info(f"[+] Disconnected from Broker")
                 time.sleep(2)
             except:
                 pass
-            if not ob_client_mqtt.is_connected():  # if client is not connected
+            if not ob_client_mqtt1.is_connected():  # if client is not connected
                 log.info(f"[+] Retrying....")
                 for _ in range(5):
-                    ob_client_mqtt = try_connect_mqtt()  # retry to connect to the broker
+                    ob_client_mqtt1 = try_connect_mqtt1()  # retry to connect to the broker
                     time.sleep(1)
-                    if ob_client_mqtt.is_connected():  # if connected: break
+                    if ob_client_mqtt1.is_connected():  # if connected: break
                         break
         # result: [0, 1]
         status = result[0]
@@ -377,7 +437,7 @@ def publish_values(payload):
                     if i:  # if payload is not empty
                         ts = i.get("ts")  # save timestamp
                         sync_payload = json.dumps(i.get("payload"))
-                        sync_result = ob_client_mqtt.publish(PUBLISH_TOPIC, sync_payload, qos=2)  # send payload
+                        sync_result = ob_client_mqtt1.publish(PUBLISH_TOPIC, sync_payload, qos=2)  # send payload
                         if sync_result[0] == 0:  # if payload sent successful remove that payload from db
                             ob_db.clear_sync_data(ts)
                         else:  # else break from the loop
@@ -388,51 +448,54 @@ def publish_values(payload):
             ob_db.add_sync_data(payload)  # if status is not 0 (ok) then add the payload to the database
 
 
-
-
-
-
 # endregion
+
 def publish_values2(payload):
-    global ob_client_mqtt
+    global ob_client_mqtt1
     payload_str = json.dumps(payload)
     log.info(f"{payload_str}")
 
     if GL_SEND_DATA:
         result = [None, None]  # set the result to None
         try:
-            result = ob_client_mqtt.publish(GL_SERIAL_TOPIC, payload_str, qos=2)  # try to publish the data
+            result = ob_client_mqtt1.publish(
+                GL_SERIAL_TOPIC , payload_str, qos=2
+            )  # try to publish the data
         except:  # if publish gives exception
             try:
-                ob_client_mqtt.disconnect()  # try to disconnect the client
+                ob_client_mqtt1.disconnect()  # try to disconnect the client
                 log.info(f"[+] Disconnected from Broker")
                 time.sleep(2)
             except:
                 pass
-            if not ob_client_mqtt.is_connected():  # if client is not connected
+            if not ob_client_mqtt1.is_connected():  # if client is not connected
                 log.info(f"[+] Retrying....")
                 for _ in range(5):
-                    ob_client_mqtt = (
-                        try_connect_mqtt()
+                    ob_client_mqtt1 = (
+                        try_connect_mqtt1()
                     )  # retry to connect to the broker
                     time.sleep(1)
-                    if ob_client_mqtt.is_connected():  # if connected: break
+                    if ob_client_mqtt1.is_connected():  # if connected: break
                         break
         # result: [0, 1]
         status = result[0]
         if status == 0:  # if status is 0 (ok)
             log.info(f"[+] Send `{result}` to topic `{GL_SERIAL_TOPIC}`")
             sync_data = (
-                ob_db.get_sync_data2()
+                ob_db.get_sync_data()
             )  # get all the data from the sync payload db
             if sync_data:  # if sync_data present
                 for i in sync_data:  # for every payload
                     if i:  # if payload is not empty
                         ts = i.get("ts")  # save timestamp
                         sync_payload = json.dumps(i.get("values"))
-                        sync_result = ob_client_mqtt.publish(GL_SERIAL_TOPIC, sync_payload, qos=2)  # send payload
-                        if (sync_result[0] == 0):  # if payload sent successful remove that payload from db
-                            ob_db.clear_sync_data2(ts)
+                        sync_result = ob_client_mqtt1.publish(
+                            GL_SERIAL_TOPIC, sync_payload, qos=2
+                        )  # send payload
+                        if (
+                                sync_result[0] == 0
+                        ):  # if payload sent successful remove that payload from db
+                            ob_db.clear_sync_data(ts)
                         else:  # else break from the loop
                             log.error("[-] Can't send sync_payload")
                             break
@@ -441,7 +504,6 @@ def publish_values2(payload):
             # ob_db.add_sync_data2(
             #     payload
             # )  # if status is not 0 (ok) then add the payload to the database
-
 
 def get_unknown_serial(line, stage, machine_id):
     stage = "{0:0>4}".format(stage)
@@ -453,7 +515,8 @@ def get_unknown_serial(line, stage, machine_id):
 
 
 if __name__ == "__main__":
-    ob_client_mqtt = try_connect_mqtt()
+    #ob_client_mqtt = try_connect_mqtt()
+    ob_client_mqtt1 = try_connect_mqtt1()
     while True:
         try:
             if GL_SERIAL_NUMBER:
@@ -462,24 +525,23 @@ if __name__ == "__main__":
                 values = {
                     "topic": "IHFQueue",
                     "message": {
-                        "currentStage": "STG006",
+                        "currentStage": "STG003",
                         "serialNumber": GL_SERIAL_NUMBER,
                         "line": "B",
                         "model": "Y9T"
-                    }, }
+                    },
+                }
                 publish_values2(values)
-            elif GL_SERIAL_NUMBER1:
+            if GL_SERIAL_NUMBER1:
                 ob_db.delete_serial_number(GL_SERIAL_NUMBER1)
                 log.info(f'[-] serial number deleted successfully')
             GL_SERIAL_NUMBER = ''
             GL_SERIAL_NUMBER1 = ""
-
             mb_client = initiate_client(GL_IP, GL_U_ID)
             data2 = read_values(mb_client, GL_PARAM_LIST)
             log.info(f'data is {data2}')
             data = get_machine_data()
             log.info(f'data is {data}')
-
             if data:
                 # log.info(f"[+] Data is {data}")
                 heating_time = data2.get('heatingTime')
@@ -498,13 +560,9 @@ if __name__ == "__main__":
                     if new_temp > GL_MAX_TEMP:
                         log.info(f"{new_temp} > {GL_MAX_TEMP}")
                         GL_MAX_TEMP = new_temp
-                        if not FL_STATUS:
-                            GL_PREV_CYCL_START = time.time()
-                        FL_STATUS = True
-                    log.info(f'[++++++]adding 6 second delay in code {(time.time() - GL_PREV_CYCL_START)} > 90')
-                #elif heating_time < GL_MAX_HEATING_TIME and heating_time == 0 and (time.time() - GL_PREV_CYCL_START) > 88:
-                elif heating_time == 0 and (time.time() - GL_PREV_CYCL_START) > 90:
-                    #log.info(f'[++++++]adding 6 second delay in code {(time.time() - GL_PREV_CYCL_START)}')
+                    FL_STATUS = True
+
+                elif heating_time < GL_MAX_HEATING_TIME and heating_time == 0:
                     FL_STATUS = False
 
                 if FL_PREV_STATUS != FL_STATUS:
@@ -533,7 +591,8 @@ if __name__ == "__main__":
                             "heatingTime": GL_MAX_HEATING_TIME,
                         }
                         log.info(payload)
-                        publish_values(payload)
+                        #publish_values(payload)
+                        publish_values1(payload)
                         ob_db.delete_serial_number(serial_number)
                         GL_PREV_KWH = GL_CURRENT_KWH
                         GL_MAX_HEATING_TIME = 0
@@ -545,3 +604,6 @@ if __name__ == "__main__":
         except Exception as e:
             time.sleep(5)
             log.error(f"[-] Error in cycle calculation {e}")
+
+
+
