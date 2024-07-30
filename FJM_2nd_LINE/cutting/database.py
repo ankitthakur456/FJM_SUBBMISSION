@@ -47,6 +47,31 @@ class DBHelper:
             log.error(f"[-] Failed to get first serial number Error {e}")
             return None
 
+    def purge_queue(self):
+        try:
+            self.cursor.execute("""DELETE FROM queue""")
+            self.connection.commit()
+            log.info(f"[+] Successful, Serial Number Deleted from the database")
+        except Exception as e:
+            log.error(f"[-] Failed to delete serial number Error {e}")
+
+    # endregion
+
+    def delete_Queue(self):
+        try:
+            # List all tables in the database
+            self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            tables = self.cursor.fetchall()
+
+            # Delete all data from all tables
+            for table in tables:
+                self.cursor.execute(f"DELETE FROM {table[0]};")
+
+            # Commit the changes and close the connection
+            self.connection.commit()
+        except Exception as e:
+            log.error(f"[-] Failed to delete Table Error {e}")
+
     def delete_serial_number(self, serial_number):
         try:
             self.cursor.execute("""DELETE FROM queue where serial_number =?""", (serial_number,))
@@ -54,6 +79,7 @@ class DBHelper:
             log.info(f"[+] Successful, Serial Number Deleted from the database")
         except Exception as e:
             log.error(f"[-] Failed to delete serial number Error {e}")
+
     # endregion
 
     # region running data functions
@@ -69,7 +95,7 @@ class DBHelper:
             else:
                 self.cursor.execute("""INSERT INTO running_data(timestamp, tube_length, energy_used, squareness, 
                 serial_number) VALUES(?,?,?,?,?)""",
-                                (time.time(), tube_length, energy_used, squareness, serial_number))
+                                    (time.time(), tube_length, energy_used, squareness, serial_number))
             self.connection.commit()
             log.info(f"[+] Successful, Running Data Saved to the database")
         except Exception as error:

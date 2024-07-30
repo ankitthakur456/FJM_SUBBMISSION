@@ -116,7 +116,6 @@ TOPIC = ''
 # topic: removeCylinder
 # message {"serialNumber":"I2320A001","stage":"STG002"}
 
-
 ob_db = DBHelper()  # Object for DBHelper database class
 
 # region Program Global Variables
@@ -137,11 +136,10 @@ FL_FIRST_CYCLE_RUN = True
 GL_SERIAL_NUMBER_LIST = []
 
 GL_MAX_TUBE_LEN = 0
-GL_TUBE_LEN = 0
 GL_MAX_TUBE_LEN1 = 0
 GL_MAX_SQUARENESS = 0
 GL_DEQUEUE_SERIAL = ''
-
+GL_SERIAL_TOPIC = 'Acknowledgements'
 
 # endregion
 
@@ -170,10 +168,11 @@ def init_conf():
             PUBLISH_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]['pub_topic']
             TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]['pub_topic2']
             TRIGGER_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]['sub_topic']
+
             MACHINE_ID = GL_MACHINE_INFO[GL_MACHINE_NAME]["machine_id"]
             GL_SERIAL_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]["SERIAL_TOPIC"]
-            LWT_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]["LWT_TOPIC"]
             STAGE = GL_MACHINE_INFO[GL_MACHINE_NAME]["stage"]
+            LWT_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]["LWT_TOPIC"]
             LINE = GL_MACHINE_INFO[GL_MACHINE_NAME]["line"]
             GL_IP = GL_MACHINE_INFO[GL_MACHINE_NAME]['ip']
             print(f"[+] Machine_name is {GL_MACHINE_NAME}")
@@ -303,6 +302,7 @@ def on_connect(client, userdata, flags, rc):
         log.info("Connected to MQTT Broker!")
         # client.subscribe(PUBLISH_TOPIC)
         client.subscribe(TRIGGER_TOPIC)
+        client.subscribe(DEQUEUE_TOPIC)
         lwt_message['status'] = 'online'
         client.publish(LWT_TOPIC, f"{lwt_message}", qos=2, retain=False)
 
@@ -561,6 +561,8 @@ if __name__ == "__main__":
     while True:
         try:
             if GL_SERIAL_NUMBER_LIST:
+                log.info(f"[+] Got New Set of Serial Numbers Purging Existing Queue")
+                ob_db.purge_queue()
                 for t_dict in GL_SERIAL_NUMBER_LIST:
                     try:
                         c_serial = t_dict.get('serialNumber')

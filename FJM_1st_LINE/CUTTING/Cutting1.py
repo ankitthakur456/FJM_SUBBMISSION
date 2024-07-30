@@ -59,28 +59,32 @@ GL_MACHINE_INFO = {
         'line': 'A'
     }}
 MOde_Selection = {
-     '1': {'140': '946', '142': '945', '144': '950', '145': '948', '146': '947', '147': '946', '148': '945', '149': '950','150':'949','156':'945', '157': '946', '158':'948', '159':'949', '160':'950'},
+    '1': {'140': '946', '142': '945', '144': '950', '145': '948', '146': '947', '147': '946', '148': '945',
+          '149': '950', '150': '949', '156': '945', '157': '946', '158': '948', '159': '949', '160': '950'},
 
-     '2': {'147':'1115','148':'1115','149':'1116','150':'1115','151':'1116','152':'1115','153':'1115','154': '1115','155': '1115', '156': '1116','157': '1116'},
+    '2': {'147': '1115', '148': '1115', '149': '1116', '150': '1115', '151': '1116', '152': '1115', '153': '1115',
+          '154': '1115', '155': '1115', '156': '1116', '157': '1116'},
 
-     '3': 'YP8',
+    '3': 'YP8',
 
-     '4': 'JBM_120L',
+    '4': 'JBM_120L',
 
-     '5': 'JBM_180L',
+    '5': 'JBM_180L',
 
-     '6': 'JBM_240L',
+    '6': 'JBM_240L',
 
-     '7': {'140': '1122', '142': '1123', '144': '1124', '145': '1125', '146': '1125', '147': '1126', '148': '1126', '149': '1127','150':'1128',
-           '151': '1128', '152': '1129', '153': '1129', '154': '1130', '155': '1130'},
+    '7': {'140': '1122', '142': '1123', '144': '1124', '145': '1125', '146': '1125', '147': '1126', '148': '1126',
+          '149': '1127', '150': '1128',
+          '151': '1128', '152': '1129', '153': '1129', '154': '1130', '155': '1130'},
 
-     '8': {'119': '1008', '120': '1009', '121': '1010', '122': '1011', '123': '1012',
+    '8': {'119': '1008', '120': '1009', '121': '1010', '122': '1011', '123': '1012',
           '124': '1013', '125': '1014', '126': '1015', '127': '1013'},
 
-     '9': {'142': '1122', '0': '1123', '146': '1124', '147': '1124', '148': '1125', '149': '1125', '150': '1126', '151':'1126',
-           '152': '1127', '153': '1127', '154': '1128', '155': '1129', '156': '1130'},
+    '9': {'142': '1122', '0': '1123', '146': '1124', '147': '1124', '148': '1125', '149': '1125', '150': '1126',
+          '151': '1126',
+          '152': '1127', '153': '1127', '154': '1128', '155': '1129', '156': '1130'},
 
-     '10': '267*75L',
+    '10': '267*75L',
 }
 
 GL_MACHINE_NAME = ''  # These variables will be initialized by init_conf
@@ -132,6 +136,9 @@ GL_MAX_TUBE_LEN = 0
 GL_MAX_TUBE_LEN1 = 0
 GL_MAX_SQUARENESS = 0
 GL_DEQUEUE_SERIAL = ''
+GL_SERIAL_TOPIC = 'Acknowledgements'
+
+
 # endregion
 
 # region Initialising Configuration here
@@ -187,6 +194,7 @@ log.info(f"[+] LWT_TOPIC is {LWT_TOPIC}")
 lwt_message = {'machine_id': MACHINE_ID, 'line_id': LINE, 'stage': STAGE, 'status': 'offline'}
 lwt_payload = f"{lwt_message}"
 
+
 # endregion
 # region Modbus Functions
 def initiate(slaveId):
@@ -214,6 +222,7 @@ def initiate(slaveId):
     log.info(f'Modbus ID Initialized: {i}')
     return instrument
 
+
 def read_values(parameters, unitId):
     mb_client = initiate(unitId)
     try:
@@ -239,7 +248,7 @@ def read_values(parameters, unitId):
 
                     data = data0 + data1 + data2 + data3
                     if data:
-                        data_list = data0 + data1 + data2 + data3 #+ data4 + data5
+                        data_list = data0 + data1 + data2 + data3  # + data4 + data5
                         break
             except Exception as e:
                 log.error(f'[+] Failed to get data {e}')
@@ -280,7 +289,6 @@ def on_message(client_, userdata, message):
                 log.info(f"line is {result_line}")
                 log.info(f"machineid is {machineid}")
                 if result_line == 'A' and machineid == "10860853":
-
                     GL_SERIAL_NUMBER_LIST = data
                     print(f"serial_number list is {GL_SERIAL_NUMBER_LIST}")
         if message.topic == DEQUEUE_TOPIC:
@@ -564,12 +572,13 @@ def get_machine_data():
 
 
 if __name__ == "__main__":
-    #ob_client_mqtt = try_connect_mqtt()
+    # ob_client_mqtt = try_connect_mqtt()
     ob_client_mqtt1 = try_connect_mqtt1()
     while True:
         try:
             if GL_SERIAL_NUMBER_LIST:
-
+                log.info(f"[+] Got New Set of Serial Numbers Purging Existing Queue")
+                ob_db.purge_queue()
                 for t_dict in GL_SERIAL_NUMBER_LIST:
                     try:
                         c_serial = t_dict.get('serialNumber')
@@ -665,7 +674,7 @@ if __name__ == "__main__":
                         my_list = random.uniform(1115, 1116)
 
                         payload['data'] = {
-                            "tubeLength":  round(my_list, 1),
+                            "tubeLength": round(my_list, 1),
                             'squareness': round(random_float, 1),
                         }
                         payload2['data'] = {

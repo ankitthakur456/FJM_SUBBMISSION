@@ -54,6 +54,14 @@ class DBHelper:
             log.info(f"[+] Successful, Serial Number Deleted from the database")
         except Exception as e:
             log.error(f"[-] Failed to delete serial number Error {e}")
+
+    def purge_queue(self):
+        try:
+            self.cursor.execute("""DELETE FROM queue""")
+            self.connection.commit()
+            log.info(f"[+] Successful, Serial Number Deleted from the database")
+        except Exception as e:
+            log.error(f"[-] Failed to delete serial number Error {e}")
     # endregion
 
     def delete_Queue(self):
