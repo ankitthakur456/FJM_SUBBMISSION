@@ -56,7 +56,7 @@ GL_MACHINE_INFO = {
         'stage': 'CUTTING',
         'SERIAL_TOPIC': 'Acknowledgements',
         'LWT_TOPIC': 'DEVICE_STATUS',
-        'line': 'A',
+        'line': 'B',
     }}
 
 MOde_Selection = {

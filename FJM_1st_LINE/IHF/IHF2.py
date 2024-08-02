@@ -68,7 +68,7 @@ GL_MACHINE_INFO = {
         'energy_topic': 'ihf_2_em',
         'param_list': ['pyrometerTemperature', 'pyrometerTemperature2', 'energyConsumption', 'heatingTime'],
         'ip': '192.168.0.1',
-        'machine_id': '01',
+        'machine_id': '02',
         'SERIAL_TOPIC': 'Acknowledgements',
         'LWT_TOPIC': 'DEVICE_STATUS',
         'stage': 'IHF2',

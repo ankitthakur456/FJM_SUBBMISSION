@@ -248,9 +248,6 @@ def initiate_modbus(slaveId):
     return instrument
 
 
-
-
-
 def get_machine_data():
     try:
         data_list = []
@@ -325,6 +322,7 @@ def Reading_data():
             return regs
     except Exception as err:
         log.error(f'Error PLC disconnected {err}')
+
 
 def on_message(client_, userdata, message):
     global GL_CURRENT_KWH, GL_SERIAL_NUMBER_LIST
