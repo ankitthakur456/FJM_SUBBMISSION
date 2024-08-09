@@ -68,6 +68,7 @@ GL_MACHINE_INFO = {
     "Bottom Spinning2": {
         "pub_topic": "STG004",
         "sub_topic": "TRIGGER_STG004",
+        "lwt_topic": "DEVICE_STATUS",
         "energy_topic": "bottom_spinning_em",
         "param_list": [
             "inductionTemperature",
@@ -83,11 +84,12 @@ GL_MACHINE_INFO = {
         'ip': '192.168.000.002',
         'machine_id': '01',
         'stage': 'BSPN',
-        'line': 'A',
+        'line': 'B',
     },
     "Neck Spinning 2": {
         "pub_topic": "STG007",
         "sub_topic": "TRIGGER_STG007",
+        "lwt_topic": "DEVICE_STATUS",
         "energy_topic": "neck_spinning_em",
         "param_list": [
             "inductionTemperature",
@@ -103,7 +105,7 @@ GL_MACHINE_INFO = {
         'ip': '192.168.0.1',
         'machine_id': '01',
         'stage': 'NSPN',
-        'line': 'A',
+        'line': 'B',
     }
 }
 
@@ -127,6 +129,8 @@ GL_CLIENT_ID = f'HIS-MQTT-{random.randint(0, 1000)}'
 PUBLISH_TOPIC = ''  # These variables will be initialized by init_conf
 TRIGGER_TOPIC = ''  # These variables will be initialized by init_conf
 ENERGY_TOPIC = ''  # These variables will be initialized by init_conf
+LWT_TOPIC = ""  # These variables will be initialized by init_conf
+
 # endregion
 
 ob_db = DBHelper()  # Object for DBHelper database class
@@ -182,7 +186,7 @@ prev_time = time.time()
 # region Initialising Configuration here
 def init_conf():
     global GL_MACHINE_NAME, GL_PARAM_LIST, PUBLISH_TOPIC, TRIGGER_TOPIC, ENERGY_TOPIC, GL_IP
-    global MACHINE_ID, LINE, STAGE
+    global MACHINE_ID, LINE, STAGE, LWT_TOPIC
     if not os.path.isdir("./conf"):
         log.info("[-] conf directory doesn't exists")
         try:
@@ -204,6 +208,7 @@ def init_conf():
             PUBLISH_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]['pub_topic']
             TRIGGER_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]['sub_topic']
             ENERGY_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]['energy_topic']
+            LWT_TOPIC = GL_MACHINE_INFO[GL_MACHINE_NAME]["lwt_topic"]
             MACHINE_ID = GL_MACHINE_INFO[GL_MACHINE_NAME]["machine_id"]
             STAGE = GL_MACHINE_INFO[GL_MACHINE_NAME]["stage"]
             LINE = GL_MACHINE_INFO[GL_MACHINE_NAME]["line"]
@@ -300,7 +305,7 @@ def get_machine_data():
             "DAAcetylenePressure",
             "propanePressure///",
             "O2PressureHeating//",
-
+            "hydrolicpower",
             "hydraulicPowerPack",
             "formingTemperature"
         ]
@@ -309,7 +314,7 @@ def get_machine_data():
             log.info(f"[+] Getting data for slave id {slave_id}")
             reg_len = 4
             if slave_id == 4:
-                reg_len = 1
+                reg_len = 2
             if slave_id == 5:
                 reg_len = 1
             try:
@@ -372,6 +377,8 @@ def on_connect(client, userdata, flags, rc):
         client.subscribe(PUBLISH_TOPIC)
         client.subscribe(TRIGGER_TOPIC)
         client.subscribe(ENERGY_TOPIC)
+        online_message = {'machine_id': MACHINE_ID, 'line_id': LINE, 'stage': STAGE, 'status': 'online'}
+        client.publish(LWT_TOPIC, f"{online_message}", qos=2, retain=False)
 
     else:
         log.error("Failed to connect, return code %d\n", rc)
@@ -384,6 +391,9 @@ def try_connect_mqtt():
     client_mqtt.username_pw_set(USERNAME, PASSWORD)
     for i in range(5):
         try:
+            offline_message = {'machine_id': MACHINE_ID, 'line_id': LINE, 'stage': STAGE, 'status': 'offline'}
+            client_mqtt.will_set(LWT_TOPIC, payload=f"{offline_message}", qos=2, retain=False)
+
             client_mqtt.connect(MQTT_BROKER, MQTT_PORT, clean_start=mqtt.MQTT_CLEAN_START_FIRST_ONLY, keepalive=60)
             if client_mqtt.is_connected():
                 break
@@ -474,24 +484,24 @@ def publish_values2(payload):
         status = result[0]
         if status == 0:  # if status is 0 (ok)
             log.info(f"[+] Send `{result}` to topic `{GL_SERIAL_TOPIC}`")
-            sync_data = (
-                ob_db.get_sync_data2()
-            )  # get all the data from the sync payload db
-            if sync_data:  # if sync_data present
-                for i in sync_data:  # for every payload
-                    if i:  # if payload is not empty
-                        ts = i.get("ts")  # save timestamp
-                        sync_payload = json.dumps(i.get("values"))
-                        sync_result = ob_client_mqtt.publish(
-                            GL_SERIAL_TOPIC, sync_payload
-                        )  # send payload
-                        if (
-                                sync_result[0] == 0
-                        ):  # if payload sent successful remove that payload from db
-                            ob_db.clear_sync_data2(ts)
-                        else:  # else break from the loop
-                            log.error("[-] Can't send sync_payload")
-                            break
+            # sync_data = (
+            #     ob_db.get_sync_data2()
+            # )  # get all the data from the sync payload db
+            # if sync_data:  # if sync_data present
+            #     for i in sync_data:  # for every payload
+            #         if i:  # if payload is not empty
+            #             ts = i.get("ts")  # save timestamp
+            #             sync_payload = json.dumps(i.get("values"))
+            #             sync_result = ob_client_mqtt.publish(
+            #                 GL_SERIAL_TOPIC, sync_payload
+            #             )  # send payload
+            #             if (
+            #                     sync_result[0] == 0
+            #             ):  # if payload sent successful remove that payload from db
+            #                 ob_db.clear_sync_data2(ts)
+            #             else:  # else break from the loop
+            #                 log.error("[-] Can't send sync_payload")
+            #                 break
         else:
             log.error(f"[-] Failed to send message to topic {GL_SERIAL_TOPIC}")
             # ob_db.add_sync_data2(
@@ -637,14 +647,14 @@ if __name__ == "__main__":
                         log.error(f"[-] Error in DAAcetylenePressure {e}")
 
                     try:
-                        if data.get("hydraulicPowerPack") > 160:
-                            log.info(f'[+]-value is more then 160 < {data.get("hydraulicPowerPack")}')
+                        if data.get("hydraulicPowerPack")/10 > 160:
+                            log.info(f'[+]-value is more then 160 < {data.get("hydraulicPowerPack")/10}')
                             hydraulicPowerPack = 157
                             GL_AV_HYDROLIC_POWER_PACK.append(hydraulicPowerPack)
                         else:
-                            hydraulicPowerPack = data.get("hydraulicPowerPack")
+                            hydraulicPowerPack = data.get("hydraulicPowerPack")/10
                             if 60 <= data.get("hydraulicPowerPack") <= 150:
-                                GL_AV_HYDROLIC_POWER_PACK.append(data.get("hydraulicPowerPack"))
+                                GL_AV_HYDROLIC_POWER_PACK.append(data.get("hydraulicPowerPack")/10)
                     except Exception as e:
                         log.error(f"[-] Error in hydraulicPowerPack {e}")
                 else:
@@ -653,10 +663,10 @@ if __name__ == "__main__":
                 if FL_PREV_STATUS != FL_STATUS:
                     serial_number = ob_db.get_first_serial_number()
                     log.info(serial_number)
-                    if serial_number is None:
-                        serial_number = "null1"
-                        log.info(f"[+] Adding Unknown serial number to queue {serial_number}")
-                        ob_db.enqueue_serial_number(serial_number)
+                    # if serial_number is None:
+                    #     serial_number = "null1"
+                    #     log.info(f"[+] Adding Unknown serial number to queue {serial_number}")
+                    #     ob_db.enqueue_serial_number(serial_number)
                     payload = {
                         "stage": GL_MACHINE_NAME,
                         "timestamp": time.time(),
@@ -759,12 +769,19 @@ if __name__ == "__main__":
                             "powerConsumption": power_consumption,
                         }
 
-                        publish_values(payload)
-                        log.info(f"payload published is {payload} ")
-                        #publish_values1(payload)
-                        log.info(f"payload published is {payload} ")
-                        ob_db.delete_serial_number(serial_number)
-                        log.info(f"serial number deleted")
+                        # publish_values(payload)
+                        if serial_number is not None:
+                            publish_values(payload)
+                            log.info(f"payload published is {payload} ")
+                            ob_db.delete_serial_number(serial_number)
+                            log.info(f"serial number deleted")
+                        else:
+                            log.warning(f"[!] {serial_number} Serial Number Found : Data send : Cancel")
+                        # log.info(f"payload published is {payload} ")
+                        # #publish_values1(payload)
+                        # log.info(f"payload published is {payload} ")
+                        # ob_db.delete_serial_number(serial_number)
+                        # log.info(f"serial number deleted")
                         Cycle_time = 0
                         GL_INDUCTION_TEMP = 0
                         GL_PRESSURE_HEAT_AVG = 0
